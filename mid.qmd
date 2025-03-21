@@ -1,10 +1,10 @@
 ---
 title: "Characterizing Automobiles"
-author: "Your Name Here"
-date: "03/17/2025"
+author: "Cameron Hayman"
+date: "03/21/2025"
 
 format: 
-  html:  # You will quite likely want to change all but the last one, to taste
+  html:
     theme:
         light: flatly
         dark: darkly
@@ -19,13 +19,14 @@ format:
 
 - Setup
 
-```{r libs}
+```{r libs, warning=FALSE}
 sh <- suppressPackageStartupMessages
 sh(library(tidyverse))
 sh(library(caret))
 sh(library(fastDummies))
 sh(library(class))
 sh(library(ISLR)) # for the "Auto" dataframe
+library(pROC)
 ```
 
 # Dataframe
@@ -47,11 +48,25 @@ names(Auto)
 - Run a linear regression model with `mpg` as the dependent variable and `horsepower` and `year` as features (variables).
 - Compute and comment on the RMSE.
 
+### Regression Model
 ```{r regression}
-# Your code here
+model <- lm(mpg ~ horsepower + year, data = Auto)
+preds <- predict(model, newdata = Auto)
+rmse <- RMSE(preds, Auto$mpg)
 ```
 
-> <span style="color:red;font-weight:bold">TODO</span>: *Explain*
+### Model Summary
+
+```{r}
+summary(model)
+```
+
+### RMSE 
+```{r}
+rmse
+```
+
+> <span style="color:red;font-weight:bold">TODO</span>: *With an RMSE of 4.37, it can be inferred that the linear regression model can accurately predict the mpg of a vehicle within a standard error of 4.5 mpg using only the year and the horsepower of the car as features within the model.*
 
 # Feature Engineering
 
@@ -60,11 +75,45 @@ names(Auto)
 - Ensure only `mpg` and the engineered features remain.
 - Compute and comment on the RMSE.
 
-```{r features}
-# Your code here
+### Names of all cars
+```{r}
+#Generated unique names to look at the various brands of cars to see if i could group by location
+#unique(Auto$name)
 ```
 
-> <span style="color:red;font-weight:bold">TODO</span>: *Explain*
+```{r features}
+auto_features <- Auto %>%
+  mutate(
+    name_lower = tolower(name),
+    brand = word(name_lower, 1),
+    is_japanese = str_detect(name_lower, "honda|toyota|datsun|mazda|subaru"),
+    is_american = str_detect(name_lower, "ford|chevrolet|chevy|buick|plymouth|dodge"),
+    is_european = str_detect(name_lower, "volkswagen|fiat|audi|bmw|peugeot|renault|opel|mercedes"),
+    is_truck = str_detect(name_lower, "pickup|truck"),
+    is_wagon = str_detect(name_lower, "wagon"),
+    is_sedan = str_detect(name_lower, "sedan"),
+    is_van = str_detect(name_lower, "van"),
+    contains_sport = str_detect(name_lower, "sport"),
+    has_deluxe = str_detect(name_lower, "deluxe"),
+    contains_limited = str_detect(name_lower, "limited"),
+  ) %>%
+  drop_na() %>% 
+  select(mpg, is_japanese, is_american, is_european, is_truck, is_wagon, is_sedan, is_van, contains_sport, has_deluxe, 
+         contains_limited)
+
+# Train/test split
+set.seed(505)
+split <- createDataPartition(auto_features$mpg, p = 0.8, list = FALSE)
+train <- auto_features[split, ]
+test <- auto_features[-split, ]
+
+fe_model <- lm(mpg ~ ., data = train)
+fe_preds <- predict(fe_model, newdata = test)
+rmse_fe <- RMSE(fe_preds, test$mpg)
+rmse_fe
+```
+
+> <span style="color:red;font-weight:bold">TODO</span>: *With an RMSE of 6.55, it can be inferred from the model that when utilizing the ten features generated using the name column, the model was able to predict the mpg of the car within 6.6mpg of its actual value. Considering this is mpg, I would consider this to be very good based on only the names.*
 
 # Classification
 
@@ -72,11 +121,48 @@ names(Auto)
 - Explain your choice of technique.
 - Report on your Kappa value.
 
+##KNN Automobile Prediction
+
+### Generating Chevrolet and Honda brands
 ```{r classification}
-# Your code here
+auto_class <- Auto %>% 
+  mutate(brand = word(name, 1)) %>% 
+  filter(brand %in% c("chevrolet", "honda")) %>% 
+  mutate(brand = factor(brand)) %>% 
+  select(mpg, horsepower, weight, year, brand) %>% 
+  drop_na()
 ```
 
-> <span style="color:red;font-weight:bold">TODO</span>: *Explain*
+### Splitting The Data
+```{r}
+set.seed(505)
+split_class <- createDataPartition(auto_class$brand, p = 0.8, list = FALSE)
+train_class <- auto_class[split_class, ]
+test_class <- auto_class[-split_class, ]
+```
+
+
+### Running The Model
+```{r}
+ctrl <- trainControl(method = "cv", number = 10)
+model_class <- train(
+  brand ~ .,
+  data = train_class,
+  method = "knn",
+  tuneGrid = expand.grid(k = 3),
+  trControl = ctrl
+)
+```
+
+
+### Confusion Matrix & Kappa Value
+```{r}
+pred_class <- predict(model_class, newdata = test_class)
+conf_class <- confusionMatrix(pred_class, test_class$brand)
+conf_class$overall["Kappa"]
+```
+
+> <span style="color:red;font-weight:bold">TODO</span>: *The Generating Brands section filters the name column of the auto dataset by the first word of the values in the name column (since after checking above with the unique statement all names in the column seemed to begin with the brand name). It then turns the variable within the newly generated brand column into a factor, and then selects the desired predictor variables to store in the auto_class dataset. The data is then split into a fairly standard 80/20 train test split, setting the seed to 505 like we have done in most of our in class examples for replication purposes. When it comes to running the model, this section is fairly self explanatory as well, with the control function specified in the beginning and stored as a ten-fold cross validation to in an attempt to improve the mdoel. The model class trains on predicting the brand variable I established previously through the KNN method, and utilizes the tunegrid to specify the number of nearest neighbors for the model to use when predicting its values. Lastly, the control is specified and references the saved method from the beginning of the chunk. Lastly, the confusion matrix and kappa are printed to give an overall sentiment of model performance. With a Kappa value of 0.615, the model performs fairly well given the aforementioned perameters when it comes to accurately predicting the brand of either Chevrolet or Honda. I chose a KNN for this model because with only two classifications and ten features, I predicted the brands at a much higher rate using KNN so I went with that option.*
 
 # Binary Classification
 
@@ -85,10 +171,29 @@ names(Auto)
 - Display and comment on an ROC curve.
 
 ```{r binary classification}
-# Your code here
+auto_binary <- Auto %>%
+  mutate(honda = as.factor(word(name, 1) == "honda")) %>%
+  select(mpg, horsepower, weight, year, honda) %>%
+  drop_na()
 ```
 
-> <span style="color:red;font-weight:bold">TODO</span>: *Explain*
+```{r}
+set.seed(505)
+split <- createDataPartition(auto_binary$honda, p = 0.8, list = FALSE)  # Fix: use auto_binary
+train <- auto_binary[split, ]
+test <- auto_binary[-split, ]
+
+bin_model <- glm(honda ~ ., data = train, family = binomial)
+bin_probs <- predict(bin_model, test, type = "response")
+
+roc_obj <- roc(as.numeric(test$honda) - 1, bin_probs)
+plot(roc_obj, col = "blue", main = "ROC Curve for Predicting Honda")
+```
+```{r}
+#auc(roc_obj)
+```
+
+> <span style="color:red;font-weight:bold">TODO</span>: *This ROC curve maps the mdoels ability to accurately classify whether the car is a honda or not. This model demonstrates a strong true positive rate, but struggles slightly with specificity. With an AUC of 0.9 however, we can see that the model is fairly accurate at predicting the class of honda vehicles compared to others.*
 
 # Ethics
 
@@ -102,17 +207,23 @@ names(Auto)
 > <span style="color:red;font-weight:bold">TODO</span>: Big Data and Human-Centered Computing
 
 ```{r big data}
-# Your code here
+#rmse_reg
 ```
+> <span style="color:red;font-weight:bold">TODO</span>: *RMSE is used to measure the average error in a regression model. This makes it useful for assessing prediction accuracy in big data applications where error minimization improves human decision-making. The example RMSE of 4.37 suggests the magnitude of the model's prediction error in a continuous outcome when it comes to things like: estimating emissions, economic indicators, or social impact metrics.*
 
 > <span style="color:red;font-weight:bold">TODO</span>: Democratic Institutions
 
 ```{r democracy}
-# Your code here
+#conf_class$overall["Kappa"]
 ```
+> <span style="color:red;font-weight:bold">TODO</span>: *The Kappa statistic measures the agreement between the model's predictions and actual labels, adjusted for random chance. As for democratic institutions, it evaluates how well a classification model can predict things like political outcomes or voter behaviors beyond random chance.*
 
 > <span style="color:red;font-weight:bold">TODO</span>: Climate Change
 
 ```{r climate}
-# Your code here
+roc_bin <- roc(as.numeric(test$honda) - 1, bin_probs)
+auc(roc_bin)
 ```
+
+> <span style="color:red;font-weight:bold">TODO</span>: *AUC quantifies the bias within a binary classifier, indicating how well the model can distinguish between two classifications. This can be used in predicting climate change risks or sustainability compliance. A higher AUC suggests that the model effectively differentiates between climate-positive and climate-negative cases, which could be used to aid policymakers in their decision-making.*
+
